@@ -124,13 +124,15 @@ def test():
             plt.plot(i,j);
             if (i**2+j**2>0.7**2) and (i**2+j**2<1):
                 tmp = net.feedforward([i,j,i*i]);
-                if np.dot([1,0],tmp)[0]<0.1:
+                error = [[1],[0]]-tmp
+                if abs(error[0][0])<0.3 and abs(error[1][0])<0.3:
                     plt.plot(i,j,'g.');
                 else:
                     plt.plot(i,j,'r.');
             if (i**2+j**2<0.3**2):
                 tmp = net.feedforward([i,j,i*i]);
-                if np.dot([0,1],tmp)[0]<0.1:
+                error = [[0],[1]]-tmp
+                if abs(error[0][0])<0.3 and abs(error[1][0])<0.3:
                     plt.plot(i,j,'g.');
                 else:
                     plt.plot(i,j,'r.');
