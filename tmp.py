@@ -2,6 +2,9 @@
 import numpy as np
 import pdb
 import matplotlib.pyplot as plt
+import mnist_loader
+import json
+import os
 
 class Network():
     def __init__(self,sizes):
@@ -10,10 +13,11 @@ class Network():
         self.weights = [np.random.randn(r,c) for r,c in zip(sizes[1:],sizes[:-1])]  #list, elements = layers-1, first input layer is not included
         self.biases  = [np.random.randn(r,1) for r   in sizes[1:]]                  #list, elements = layers-1, first input layer is not included
         self.costs   = [];
-        self.accuracy= [];
+        self.valid_accuracy= [];
+        self.train_accuracy= [];
 
     def activiate_fun(self,z):
-        ''' activiate_ function : sigmod()'''
+        ''' activiate_ function : sigmod()''' 
         return 1.0/(1.0+np.exp(-z))
 
     def activiate_derivative_fun(self,z):
@@ -29,13 +33,23 @@ class Network():
         for x,y in dataset:
             output = self.feedforward(x);
             error = np.array(y)-output
-            error1 = np.sqrt(np.dot(error.T,error)[0][0]/len(error))
-            sum += error1;
-            if abs(error[0][0])<0.3 and abs(error[1][0])<0.3:
+            error = np.sqrt(np.dot(error.T,error)[0][0]/len(error))
+            sum += error;
+        return sum/len(dataset)
+
+        
+    def calculate_accuracy(self,valid_set,trans=False):
+        accuracy = 0;
+        for x,y in valid_set:
+            output = self.feedforward(x)
+            error = np.array(y)-output
+            if trans and np.argmax(output)==np.argmax(y):
                 accuracy +=1
+            if not trans and np.argmax(output)==y:
+                accuracy +=1
+        return accuracy*100/len(valid_set)
 
-        return (sum/len(dataset),accuracy*100/len(dataset))
-
+        
     def feedforward(self,x):
         '''input a sample x, calculate output of network, x is column vector. '''
         output = []                     # save output of each layer
@@ -80,7 +94,7 @@ class Network():
 
         return nabla_w, nabla_b
 
-    def minibatch_gradient(self, minibatch, eta):
+    def minibatch_gradient(self, minibatch, eta, lmbda, N):
         ''' calculate weights and biases gradient on small batch dataset.
             eta is the learning rate
         '''
@@ -100,25 +114,28 @@ class Network():
             nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, single_b)]    #nabla_b is list, but the element is np.array
             nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, single_w)]
         # update the weights and biases
-        self.weights = [w-(eta/len(minibatch))*nw for w, nw in zip(self.weights, nabla_w)]
+        self.weights = [w-(eta/len(minibatch))*nw-(eta*lmbda/N)*w for w, nw in zip(self.weights, nabla_w)]
         self.biases  = [b-(eta/len(minibatch))*nb for b, nb in zip(self.biases, nabla_b)]
 
 
-    def SGD(self, training_data, epochs, batch_size, eta , valid_set=[]):
+    def SGD(self, training_data, epochs, batch_size, eta , lmbda , valid_set=[]):
         '''Train the neural network using mini-batch stochastic gradient descent. '''
         N = len(training_data)
         for j in range(epochs):
             np.random.shuffle(training_data)
             for k in range(0, N, batch_size):
-                self.minibatch_gradient(training_data[k:k+batch_size], eta)
+                self.minibatch_gradient(training_data[k:k+batch_size], eta, lmbda, N)
 
             #calculate cost
             cost = self.calculate_cost(training_data)
-            self.costs.append(cost[0]);
-            print("Epoch {0} complete, cost: {1:.7f}".format(j,cost[0]))
+            self.costs.append(cost);
+            tmp = self.calculate_accuracy(training_data,True)
+            self.train_accuracy.append(tmp);
+            print("Epoch {0} complete, cost: {1:.7f}, accuracy: {2:.3f}".format(j,cost,tmp))
             #calculate valid_set accuracy
-            cost = self.calculate_cost(valid_set)
-            self.accuracy.append(cost[1]);
+            if(valid_set!=[]):
+                tmp = self.calculate_accuracy(valid_set,False)
+                self.valid_accuracy.append(tmp);
 
 
 def test():
@@ -145,9 +162,9 @@ def test():
 
     net = Network([3,4,2]);
     epoches = 500;
-    batchsize = 6
-    learnrate = 0.1
-    net.SGD(dataset,epoches,batchsize,learnrate,validset);
+    batchsize = 4
+    learnrate = 0.05
+    net.SGD(dataset,epoches,batchsize,learnrate,1,validset);
 
     plt.figure(1);
     plt.subplot(131)
@@ -157,15 +174,13 @@ def test():
             plt.plot(i,j);
             if (i**2+j**2>0.7**2) and (i**2+j**2<1):
                 tmp = net.feedforward([i,j,i*i]);
-                error = [[1],[0]]-tmp
-                if abs(error[0][0])<0.3 and abs(error[1][0])<0.3:
+                if np.argmax(tmp)==np.argmax([[1],[0]]):
                     plt.plot(i,j,'g.');
                 else:
                     plt.plot(i,j,'r.');
             if (i**2+j**2<0.3**2):
                 tmp = net.feedforward([i,j,i*i]);
-                error = [[0],[1]]-tmp
-                if abs(error[0][0])<0.3 and abs(error[1][0])<0.3:
+                if np.argmax(tmp)==np.argmax([[0],[1]]):
                     plt.plot(i,j,'g.');
                 else:
                     plt.plot(i,j,'r.');
@@ -181,4 +196,71 @@ def test():
     plt.plot(range(epoches),net.accuracy);
     plt.show();     #show() will block the threshold, put it at end.
 
-test();
+
+def saveNet(net,filename=''):
+    '''save sizes, biases and weights into file'''
+    curdir = os.path.split(os.path.realpath(__file__))[0]
+    file = curdir+'/net_size_w_b_randn.json';
+    if filename!='':
+        file = curdir+'/'+filename;
+    with open(file, 'w') as f:
+        data = {
+            "sizes": net.sizes,
+            "weights": [w.tolist() for w in net.weights],  #np.array.tolist
+            "biases": [b.tolist() for b in net.biases]
+            #"costs": str(net.costs.__name__)
+        }
+        json.dump(data,f,indent=4)
+        
+def initNet(filename=''):
+    ''' create net from file '''
+    curdir = os.path.split(os.path.realpath(__file__))[0]
+    file = curdir+'/net_size_w_b_randn.json';
+    if filename!='':
+        file = curdir+'/'+filename;
+    with open(file, 'r') as f:
+        netstruct = json.load(f);
+    net = Network(netstruct['sizes'])
+    net.weights = [np.array(w) for w in netstruct['weights']]
+    net.biases  = [np.array(b) for b in netstruct['biases']]
+
+    return net;
+    
+def test2():
+    training_data, validation_data, test_data = mnist_loader.load_data_wrapper()
+    training_data = list(training_data);
+    validation_data = list(validation_data);
+    test_data = list(test_data);
+
+    #net = Network([784, 30, 10])
+    net = initNet()     #_已经提前初始化好权重和偏差
+    epoches = 300;
+    batchsize = 10
+    learnrate = 0.05
+    net.SGD(training_data[:1000],epoches,batchsize,learnrate,5,validation_data[:1000]);
+    saveNet(net,'trained_regularized_20_10_0.05.json')
+    plt.figure(0)
+    plt.title('costs per epoch')
+    plt.plot(range(epoches),net.costs);
+    plt.figure(1);
+    plt.title('train accuracy');
+    plt.plot(range(epoches),net.train_accuracy);
+    plt.figure(2);
+    plt.title('valid accuracy');
+    plt.plot(range(epoches),net.valid_accuracy);
+    plt.show()
+    
+    #save network
+    
+        
+    #pdb.set_trace()
+
+def test3():
+    net = initNet('trained_20_10_0.05.json')
+    training_data, validation_data, test_data = mnist_loader.load_data_wrapper()
+    validation_data = [z for z in validation_data]
+    tmp = net.calculate_accuracy(validation_data,False)
+    print(tmp)
+
+    
+test2();
